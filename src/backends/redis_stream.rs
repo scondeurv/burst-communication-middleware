@@ -450,7 +450,7 @@ where
     log::debug!("[Redis Stream] Adding RemoteMessage to stream {}", key);
     let data: [&[u8]; 2] = msg.into();
     connection
-        .xadd(key, "*", &[("h", data[0]), ("p", data[1])])
+        .xadd::<_, _, _, _, ()>(key, "*", &[("h", data[0]), ("p", data[1])])
         .await?;
     Ok(())
 }

@@ -310,8 +310,8 @@ impl RemoteBroadcastSendProxy for RedisListBroadcastSendProxy {
         );
         log::debug!("SET {:?} {}:header {}:payload", msg, bcast_key, bcast_key);
         let [header, payload]: [&[u8]; 2] = (&msg).into();
-        conn.set(format!("{}:header", bcast_key), header).await?;
-        conn.set(format!("{}:payload", bcast_key), payload).await?;
+        conn.set::<_, _, ()>(format!("{}:header", bcast_key), header).await?;
+        conn.set::<_, _, ()>(format!("{}:payload", bcast_key), payload).await?;
 
         for dest in self.burst_options.group_ranges.keys() {
             if *dest == self.burst_options.group_id {
@@ -323,7 +323,7 @@ impl RemoteBroadcastSendProxy for RedisListBroadcastSendProxy {
                 dest,
             );
             log::debug!("RPUSH {} {}", dest_group_key, bcast_key);
-            conn.rpush(dest_group_key, &bcast_key).await?;
+            conn.rpush::<_, _, ()>(dest_group_key, &bcast_key).await?;
         }
         Ok(())
     }
@@ -413,7 +413,7 @@ where
     let data: [&[u8]; 2] = msg.into();
     let payload = data.concat();
     log::debug!("RPUSH {:?}", key);
-    connection.rpush(key, payload).await?;
+    connection.rpush::<_, _, ()>(key, payload).await?;
     Ok(())
 }
 
