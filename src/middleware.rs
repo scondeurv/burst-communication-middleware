@@ -336,13 +336,9 @@ where
                 // do remote send with chunking if enabled
                 let chunked_messages = chunk_message(&remote_msg, self.message_chunk_size);
                 log::debug!("Chunked message in {} parts", chunked_messages.len());
-
-                let futures = chunked_messages
-                    .into_iter()
-                    .map(|msg| Self::remote_broadcast_send(Arc::clone(&self.remote_broadcast), msg))
-                    .map(tokio::spawn)
-                    .collect::<FuturesUnordered<_>>();
-                futures::future::try_join_all(futures).await?;
+                for msg in chunked_messages {
+                    Self::remote_broadcast_send(Arc::clone(&self.remote_broadcast), msg).await?;
+                }
             } else {
                 // do remote send in one chunk
                 self.remote_broadcast
@@ -592,12 +588,9 @@ where
             let chunked_messages =
                 chunk_message(&RemoteMessage::from(msg), self.message_chunk_size);
             log::debug!("Chunked message in {} parts", chunked_messages.len());
-            let futures = chunked_messages
-                .into_iter()
-                .map(|msg| Self::remote_send(to, Arc::clone(&self.remote_send_receive), msg))
-                .map(tokio::spawn)
-                .collect::<FuturesUnordered<_>>();
-            futures::future::try_join_all(futures).await?;
+            for msg in chunked_messages {
+                Self::remote_send(to, Arc::clone(&self.remote_send_receive), msg).await?;
+            }
         } else {
             // do remote send in one chunk
             return self
@@ -622,34 +615,21 @@ where
                 .map(tokio::spawn),
         );
 
-        // Send remote messages
-        futures.extend(
-            remote_msg
-                .into_iter()
-                .flat_map(|(to, msg)| {
-                    let remote_message = RemoteMessage::from(msg);
-                    if self.enable_message_chunking {
-                        // do remote send with chunking if enabled
-                        let chunked_messages =
-                            chunk_message(&remote_message, self.message_chunk_size);
-                        log::debug!("Chunked message in {} parts", chunked_messages.len());
-                        chunked_messages
-                            .into_iter()
-                            .map(|msg| {
-                                Self::remote_send(to, Arc::clone(&self.remote_send_receive), msg)
-                            })
-                            .collect::<Vec<_>>()
-                    } else {
-                        // do remote send in one chunk
-                        vec![Self::remote_send(
-                            to,
-                            Arc::clone(&self.remote_send_receive),
-                            remote_message,
-                        )]
-                    }
-                })
-                .map(tokio::spawn),
-        );
+        // Send remote messages sequentially. Chunked concurrent connection setup
+        // hangs in CloudLab with Redis-backed collectives.
+        for (to, msg) in remote_msg {
+            let remote_message = RemoteMessage::from(msg);
+            if self.enable_message_chunking {
+                let chunked_messages = chunk_message(&remote_message, self.message_chunk_size);
+                log::debug!("Chunked message in {} parts", chunked_messages.len());
+                for msg in chunked_messages {
+                    Self::remote_send(to, Arc::clone(&self.remote_send_receive), msg).await?;
+                }
+            } else {
+                Self::remote_send(to, Arc::clone(&self.remote_send_receive), remote_message)
+                    .await?;
+            }
+        }
 
         futures::future::try_join_all(futures).await?;
         Ok(())
@@ -1080,19 +1060,6 @@ where
 
     async fn remote_broadcast_recv(proxy: Arc<dyn RemoteBroadcastProxy>) -> Result<RemoteMessage> {
         proxy.remote_broadcast_recv().await
-    }
-
-    async fn local_broadcast_send(
-        proxy: Arc<dyn LocalBroadcastProxy<T>>,
-        msg: LocalMessage<T>,
-    ) -> Result<()> {
-        proxy.local_broadcast_send(msg).await
-    }
-
-    async fn local_broadcast_recv(
-        proxy: Arc<dyn LocalBroadcastProxy<T>>,
-    ) -> Result<LocalMessage<T>> {
-        proxy.local_broadcast_recv().await
     }
 
     fn get_counter<U>(map: &HashMap<U, u32>, key: &U) -> Result<u32>
