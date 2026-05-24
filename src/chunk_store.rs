@@ -78,6 +78,12 @@ pub fn chunk_message(msg: &RemoteMessage, max_chunk_size: usize) -> Vec<RemoteMe
         chunks.push(chunk);
     }
 
+    // Empty payload: emit one zero-byte chunk so receiver sees num_chunks=1
+    // and can reassemble an empty body instead of blocking forever on BLPOP.
+    if chunks.is_empty() {
+        chunks.push(body);
+    }
+
     let num_chunks = chunks.len();
     chunks
         .into_iter()
